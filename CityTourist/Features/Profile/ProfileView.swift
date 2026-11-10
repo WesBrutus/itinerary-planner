@@ -31,7 +31,8 @@ struct ProfileView: View {
             .background(Palette.canvas)
             .scrollIndicators(.hidden)
             .navigationTitle("Profile")
-            .sheet(isPresented: $signingIn) { PhoneSignInView() }
+            .sheet(isPresented: $signingIn) { AccountSheet() }
+            .sensoryFeedback(.success, trigger: auth.session?.user.id) { _, id in id != nil }
             .alert("Edit profile", isPresented: $editing) {
                 TextField("Your name", text: $name)
                 Button("Save") {
@@ -142,16 +143,24 @@ struct ProfileView: View {
             })) { ForEach(DistanceUnit.allCases) { Text($0.title).tag($0) } }
             Text("Account").sectionTitleStyle().padding(.top, 12)
             if let session = auth.session {
-                Text(session.user.phone.map { $0.hasPrefix("+") ? $0 : "+" + $0 } ?? L10n.text("Signed in")).metaStyle()
+                Text(accountLabel(session.user)).metaStyle()
                 Button("Sign out") { Task { await auth.signOut() } }.disabled(auth.busy)
             } else if auth.isConfigured {
-                row("Sign in with phone", symbol: "phone") { signingIn = true }
+                row("Log in or sign up", symbol: "person.crop.circle") { signingIn = true }
             } else {
                 Text("Phone sign-in is not configured yet.").captionStyle()
             }
             Text("Trips and saved places stay on this device.").captionStyle()
             if let error = auth.errorMessage { Text(error).captionStyle().foregroundStyle(Brand.rausch) }
         }
+    }
+
+    /// The phone number for a phone account; Apple accounts show their email,
+    /// which may be a private relay address, or just that Apple was used.
+    private func accountLabel(_ user: AuthSession.User) -> String {
+        if let phone = user.phone, !phone.isEmpty { return phone.hasPrefix("+") ? phone : "+" + phone }
+        if let email = user.email, !email.isEmpty { return email }
+        return L10n.text("Signed in with Apple")
     }
 
     private var aboutSection: some View {

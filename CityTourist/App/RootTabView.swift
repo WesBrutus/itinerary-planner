@@ -9,6 +9,8 @@ struct RootTabView: View {
     @State private var selection: TabID = .explore
     @State private var hasChosenInitialTab = false
     @State private var isShowingIntro = true
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @State private var onboardingStarted = false
 
     private enum TabID: Hashable { case explore, saved, trips, profile }
 
@@ -23,8 +25,15 @@ struct RootTabView: View {
                     Button("Try again") { store.retryStorage() }
                         .buttonStyle(.borderedProminent)
                 }
+            } else if needsOnboarding {
+                OnboardingView {
+                    withAnimation(reduceMotion ? nil : Animation.easeInOut(duration: 0.35)) { hasCompletedOnboarding = true }
+                }
+                .onAppear { onboardingStarted = true }
+                .transition(.opacity)
             } else {
                 tabs
+                    .transition(.opacity)
                     .safeAreaInset(edge: .top, spacing: 0) {
                         if store.storageIssue == .unsaved {
                             VStack(alignment: .leading, spacing: 8) {
@@ -75,6 +84,15 @@ struct RootTabView: View {
         .onChange(of: voiceOver) { _, enabled in
             if enabled { isShowingIntro = false }
         }
+    }
+
+    /// New travellers get the walk-through once. Anyone who already has trips,
+    /// saved places or an account from an earlier build goes straight in. Once
+    /// it has started, signing in or saving along the way doesn't cut it short.
+    private var needsOnboarding: Bool {
+        guard !hasCompletedOnboarding else { return false }
+        return onboardingStarted
+            || (store.trips.isEmpty && store.savedPlaceIDs.isEmpty && authentication.session == nil)
     }
 
     private var tabs: some View {

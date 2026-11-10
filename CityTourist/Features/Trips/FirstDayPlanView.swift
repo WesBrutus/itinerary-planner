@@ -7,6 +7,7 @@ struct FirstDayPlanView: View {
     let onAccept: ([ItineraryStop]) -> Void
 
     @Environment(PlaceCatalog.self) private var catalog
+    @Environment(AppStore.self) private var store
     @State private var interests: Set<PlaceCategory> = [.attraction, .museum]
     @State private var pace: FirstDayPlanner.Pace = .relaxed
     @State private var mustSeeID: String? = nil
@@ -69,7 +70,12 @@ struct FirstDayPlanView: View {
                 }
             }
         }
-        .task { await loadPlaces() }
+        .task {
+            // Start from what the traveller said they like in onboarding.
+            let liked = Set(store.profile.interests ?? []).intersection(FirstDayPlanner.interests)
+            if !liked.isEmpty { interests = liked }
+            await loadPlaces()
+        }
         .onChange(of: interests) { _, _ in reset() }
         .onChange(of: pace) { _, _ in reset() }
     }

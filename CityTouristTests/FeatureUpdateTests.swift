@@ -152,6 +152,10 @@ private actor FakePhoneAuth: PhoneAuthServing {
         if let error { throw error }
         return Self.session
     }
+    func signInWithApple(idToken: String, nonce: String) async throws -> AuthSession {
+        if let error { throw error }
+        return Self.session
+    }
     func refresh(token: String) async throws -> AuthSession {
         refreshes += 1
         try await Task.sleep(for: .milliseconds(30))
@@ -195,6 +199,20 @@ private actor FakePhoneAuth: PhoneAuthServing {
         await auth.verify(code: "123456")
         #expect(auth.session == nil && auth.errorMessage != nil)
     }
+    @Test func appleSignInStoresTheSessionAndRejectionsNeverDo() async {
+        let storage = MemorySession()
+        let auth = AuthenticationStore(service: FakePhoneAuth(), storage: storage)
+        await auth.signInWithApple(idToken: "token", nonce: "nonce")
+        #expect(auth.session != nil && storage.value == auth.session)
+        let rejected = AuthenticationStore(service: FakePhoneAuth(error: .expiredCode), storage: MemorySession())
+        await rejected.signInWithApple(idToken: "token", nonce: "nonce")
+        #expect(rejected.session == nil)
+        #expect(rejected.errorMessage == AccountError.appleRejected.localizedDescription)
+    }
+    @Test func appleNonceIsRandomAndHashedAsAppleExpects() {
+        #expect(AppleNonce.make().count == 32 && AppleNonce.make() != AppleNonce.make())
+        #expect(AppleNonce.sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    }
     @Test func concurrentTokenRequestsShareOneRefresh() async throws {
         let storage = MemorySession(); var session = FakePhoneAuth.session; session.expires_at = 0; storage.value = session
         let fake = FakePhoneAuth(), auth = AuthenticationStore(service: nil, storage: MemorySession())
@@ -218,6 +236,13 @@ extension PlacesAPITests {
         #expect(StubURLProtocol.recorded.first?.stubBody?["phone"] as? String == "+12025550123")
         StubURLProtocol.respond(status: 403, json: #"{"error_code":"otp_expired"}"#)
         await #expect(throws: AccountError.self) { try await service.verify(phone: "+12025550123", code: "123456") }
+        StubURLProtocol.reset()
+        StubURLProtocol.respond(json: #"{"access_token":"a","refresh_token":"r","expires_in":3600,"user":{"id":"7F0C1C9E-6C0B-4C5B-9C55-0C6E0C1D2E3F","email":"traveler@example.com"}}"#)
+        let apple = try await service.signInWithApple(idToken: "identity", nonce: "raw")
+        #expect(apple.user.email == "traveler@example.com" && apple.user.phone == nil)
+        #expect(StubURLProtocol.recorded.first?.url?.query == "grant_type=id_token")
+        #expect(StubURLProtocol.recorded.first?.stubBody?["provider"] as? String == "apple")
+        #expect(StubURLProtocol.recorded.first?.stubBody?["nonce"] as? String == "raw")
     }
     @Test func ticketmasterPaginationFollowsMetadata() async throws {
         StubURLProtocol.reset()

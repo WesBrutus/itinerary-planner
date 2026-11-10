@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Observation
 import Security
@@ -34,7 +35,7 @@ struct PhoneCountry: Identifiable, Hashable {
 }
 
 struct AuthSession: Codable, Equatable {
-    struct User: Codable, Equatable { let id: UUID; let phone: String? }
+    struct User: Codable, Equatable { let id: UUID; let phone: String?; var email: String? = nil }
     let access_token: String
     let refresh_token: String
     let expires_in: TimeInterval
@@ -44,7 +45,7 @@ struct AuthSession: Codable, Equatable {
 }
 
 enum AccountError: LocalizedError {
-    case unavailable, invalidPhone, invalidCode, expiredCode, rateLimited(Int), network, server, secureStorage
+    case unavailable, invalidPhone, invalidCode, expiredCode, rateLimited(Int), network, server, secureStorage, appleRejected
     var errorDescription: String? {
         switch self {
         case .unavailable: L10n.text("Phone sign-in is not configured yet.")
@@ -55,6 +56,7 @@ enum AccountError: LocalizedError {
         case .network: L10n.text("Could not connect. Check your connection and try again.")
         case .server: L10n.text("Sign-in is temporarily unavailable. Please try again.")
         case .secureStorage: L10n.text("Your session could not be saved securely. Please try again.")
+        case .appleRejected: L10n.text("Apple sign-in could not be completed. Please try again.")
         }
     }
 }
@@ -69,9 +71,22 @@ struct SupabaseConfiguration {
     }
 }
 
+/// Apple signs the hashed nonce into its token; Supabase checks it against the raw one.
+enum AppleNonce {
+    static func make(length: Int = 32) -> String {
+        let characters = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+        var generator = SystemRandomNumberGenerator()
+        return String((0..<max(16, length)).map { _ in characters.randomElement(using: &generator) ?? "0" })
+    }
+    static func sha256(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 protocol PhoneAuthServing {
     func requestCode(phone: String) async throws
     func verify(phone: String, code: String) async throws -> AuthSession
+    func signInWithApple(idToken: String, nonce: String) async throws -> AuthSession
     func refresh(token: String) async throws -> AuthSession
     func logout(accessToken: String) async throws
 }
@@ -85,6 +100,10 @@ struct SupabasePhoneService: PhoneAuthServing {
     }
     func verify(phone: String, code: String) async throws -> AuthSession {
         try decode(try await request("verify", body: ["phone": phone, "token": code, "type": "sms"]))
+    }
+    func signInWithApple(idToken: String, nonce: String) async throws -> AuthSession {
+        try decode(try await request("token", query: "id_token",
+                                     body: ["provider": "apple", "id_token": idToken, "nonce": nonce]))
     }
     func refresh(token: String) async throws -> AuthSession {
         try decode(try await request("token", query: "refresh_token", body: ["refresh_token": token]))
@@ -204,6 +223,21 @@ final class AuthenticationStore {
             session = verified; pendingPhone = nil
         } catch { handle(error) }
     }
+    func signInWithApple(idToken: String, nonce: String) async {
+        guard !busy else { return }
+        guard let service else { errorMessage = AccountError.unavailable.localizedDescription; return }
+        busy = true; errorMessage = nil
+        defer { busy = false }
+        do {
+            let verified = try await service.signInWithApple(idToken: idToken, nonce: nonce)
+            try storage.write(verified)
+            session = verified; pendingPhone = nil
+        } catch AccountError.expiredCode {
+            // The shared transport reports any rejected credential as an expired code.
+            errorMessage = AccountError.appleRejected.localizedDescription
+        } catch { handle(error) }
+    }
+    func appleSignInFailed() { errorMessage = AccountError.appleRejected.localizedDescription }
     /// A single refresh is shared by concurrent avatar/API requests.
     func accessToken() async throws -> String {
         guard let session, let service else { throw AccountError.unavailable }

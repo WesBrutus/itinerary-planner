@@ -109,7 +109,7 @@ struct PrimaryButton: View {
                 .clipShape(RoundedRectangle(cornerRadius: Metric.buttonRadius, style: .continuous))
                 .opacity(isEnabled ? 1 : 0.4)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableButtonStyle())
         .disabled(!isEnabled)
     }
 }
@@ -138,7 +138,7 @@ struct SecondaryButton: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: Metric.buttonRadius, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableButtonStyle())
     }
 }
 

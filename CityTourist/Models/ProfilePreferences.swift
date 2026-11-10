@@ -5,6 +5,9 @@ struct UserProfile: Codable, Equatable {
     var displayName: String = ""
     var language: AppLanguage = .device
     var distanceUnit: DistanceUnit = .automatic
+    /// What the traveller picked in onboarding. Optional so profiles saved
+    /// before onboarding existed still decode.
+    var interests: [PlaceCategory]?
 }
 
 enum AppLanguage: String, Codable, CaseIterable, Identifiable {
